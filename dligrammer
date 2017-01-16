@@ -113,19 +113,20 @@ If writing the script is interrupted, your switch's script may be left in an
 inconsistent state and will not be running. You can safely run this again
 to fix this and get scripting running again.''')
     parser.add_argument('SCRIPT', type=str,
-        help='A file containing a DLI-flavored Basic script.')
+        help='file containing a DLI-flavored Basic script')
     parser.add_argument('HOST', type=str,
-        help='The hostname or IP address of a DLI Web Power Switch.')
+        help='hostname or IP address of a DLI Web Power Switch')
 
     parser.add_argument('--user', type=str, default='admin',
-        help='The username to provide to the switch.')
+        help='username to provide to the switch (default: admin)')
     parser.add_argument('--pass', type=str, default='1234', dest='passwd',
-        help='The password to provide to the switch.')
+            help='password to provide to the switch (default: 1234)')
     parser.add_argument('--timeout', type=int, default=3,
-        help = 'The maximum number of seconds to wait for any single request.')
+        help = '''maximum number of seconds to wait for any single request
+            (default: 3)''')
     parser.add_argument('--attempts', type=int, default=3,
-        help='''The number of attempts to make on any single request before
-        aborting the entire run.''')
+        help='''number of attempts to make on any single request before
+            aborting the entire run (default: 3)''')
     args = parser.parse_args()
     switch = Switch(
             args.HOST, args.user, args.passwd,
