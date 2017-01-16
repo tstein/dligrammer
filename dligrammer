@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+
+from argparse import ArgumentParser
+from sys import exit, stdout
+
+import requests
+
+
+SCRIPT_CAPACITY = 127
+
+
+class Switch():
+    def __init__(self, host, user, passwd, timeout, attempts):
+        self.host = host
+        self.user = user
+        self.passwd = passwd
+        self.timeout = timeout
+        self.attempts = attempts
+
+    def auth(self):
+        return (self.user, self.passwd)
+
+
+def load_script(script_path):
+    with open(script_path, 'r') as script:
+        script_lines = script.readlines()
+
+    if len(script_lines) > SCRIPT_CAPACITY:
+        msg = '''ERROR: Script has {lines} lines, but the switch can only accept
+            {max_lines}.'''
+        print(msg.format(lines=len(script_lines), max_lines=SCRIPT_CAPACITY))
+        exit(255)
+
+    # Pad the script with ENDs.
+    for _ in range(len(script_lines), SCRIPT_CAPACITY):
+        script_lines.append('END')
+
+    return script_lines
+
+
+'''
+Some APIs are exposed on /script and others on /script.cgi.
+'''
+def switch_script_post(switch, params, cgi=False):
+    url = 'http://{host}/script{cgi}'.format(
+            host=switch.host,
+            cgi='.cgi' if cgi else '')
+    attempts = 0
+    while attempts < switch.attempts:
+        try:
+            r = requests.post(
+                    url,
+                    auth=switch.auth(),
+                    data=params,
+                    timeout=switch.timeout)
+            break
+        except (ConnectionResetError, requests.exceptions.ConnectTimeout):
+            attempts += 1
+
+    if r.status_code != 200:
+        msg = '\nERROR: Got a {code} trying to POST to {url} as {user}:{passwd}.'
+        print(msg.format(
+            code=r.status_code,
+            url=r.url,
+            user=switch.user,
+            passwd=switch.passwd))
+        if ('SECURITY LOCKOUT' in r.text):
+            print()
+            print('Additionally, the switch has entered security lockout mode.')
+            print('Please wait for the lockout to expire or reboot the switch.')
+        exit(255)
+
+def stop_scripting(switch):
+    stdout.write('\rStopping scripting... ')
+    params = {'stop': ''}
+    switch_script_post(switch, params, cgi=True)
+    stdout.write('done.\n')
+
+
+def start_scripting(switch, line_num):
+    stdout.write('\rStarting a thread at line {num}... '.format(num=line_num))
+    params = {'run{:03}'.format(line_num): 'run'}
+    switch_script_post(switch, params)
+    stdout.write('done.\n')
+
+
+def write_script(script, switch):
+    def write_line(switch, line_num, text):
+        params = {'edit{:03}'.format(line_num): text}
+        switch_script_post(switch, params)
+
+    # Scripts are 1-indexed.
+    enumerated_lines = [(i + 1, l) for i, l in enumerate(script)]
+
+    stdout.write('\rWriting script...   0%')
+    for line_num, line in enumerated_lines:
+        progress = int(round(line_num / SCRIPT_CAPACITY, 2) * 100)
+        stdout.write(
+                '\rWriting script... {progress:3d}%'.format(progress=progress))
+        write_line(switch, line_num, line.strip())
+
+    stdout.write('\rWriting script... 100%\n')
+
+
+def main():
+    parser = ArgumentParser(
+        description='''Write a script to a DLI Web Power Switch.
+
+This program will stop all threads on the switch, overwrite the entire script
+stored on it, and start a thread at the first line of your script.
+
+If writing the script is interrupted, your switch's script may be left in an
+inconsistent state and will not be running. You can safely run this again
+to fix this and get scripting running again.''')
+    parser.add_argument('SCRIPT', type=str,
+        help='A file containing a DLI-flavored Basic script.')
+    parser.add_argument('HOST', type=str,
+        help='The hostname or IP address of a DLI Web Power Switch.')
+
+    parser.add_argument('--user', type=str, default='admin',
+        help='The username to provide to the switch.')
+    parser.add_argument('--pass', type=str, default='1234', dest='passwd',
+        help='The password to provide to the switch.')
+    parser.add_argument('--timeout', type=int, default=3,
+        help = 'The maximum number of seconds to wait for any single request.')
+    parser.add_argument('--attempts', type=int, default=3,
+        help='''The number of attempts to make on any single request before
+        aborting the entire run.''')
+    args = parser.parse_args()
+    switch = Switch(
+            args.HOST, args.user, args.passwd,
+            args.timeout, args.attempts)
+
+    script = load_script(args.SCRIPT)
+    stop_scripting(switch)
+    write_script(script, switch)
+    start_scripting(switch, 1)
+
+
+if __name__ == '__main__':
+    main()
