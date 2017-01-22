@@ -2,6 +2,7 @@
 
 from argparse import ArgumentParser
 from sys import exit, stdout
+import re
 
 import bs4
 import requests
@@ -24,13 +25,18 @@ class Switch():
 
 def load_script(script_path):
     with open(script_path, "r") as script:
-        script_lines = script.readlines()
+        raw_lines = script.readlines()
 
-    if len(script_lines) > SCRIPT_CAPACITY:
+    if len(raw_lines) > SCRIPT_CAPACITY:
         msg = """ERROR: Script has {lines} lines, but the switch can only accept
             {max_lines}."""
-        print(msg.format(lines=len(script_lines), max_lines=SCRIPT_CAPACITY))
+        print(msg.format(lines=len(raw_lines), max_lines=SCRIPT_CAPACITY))
         exit(255)
+
+    def clean(line):
+        return re.sub("#.*", "", line).strip()
+
+    script_lines = [clean(l) for l in raw_lines]
 
     # Pad the script with ENDs.
     for _ in range(len(script_lines), SCRIPT_CAPACITY):
@@ -105,7 +111,6 @@ def line_equal(expected, actual):
 
 def verify_script(expected, switch):
     stdout.write("Verifying that the switch has the new script... ")
-    expected = [e.strip() for e in expected]
     actual = read_script(switch)
     for i, (e, a) in enumerate(zip(expected, actual)):
         if not line_equal(e, a):
@@ -137,10 +142,6 @@ def switch_script_post(switch, params, cgi=False):
                 requests.exceptions.ConnectTimeout,
                 requests.exceptions.ConnectionError):
             attempts += 1
-    if not r:
-        msg = "\nERROR: Timeout connecting to {host}. Please check the host and try again."
-        print(msg.format(host=switch.host))
-        exit(255)
 
     if r.status_code != 200:
         msg = "\nERROR: Got a {code} trying to POST to {url} as {user}:{passwd}."
@@ -182,7 +183,7 @@ def write_script(script, switch):
         progress = int(round(line_num / SCRIPT_CAPACITY, 2) * 100)
         stdout.write(
                 "\rWriting script... {progress:3d}%".format(progress=progress))
-        write_line(switch, line_num, line.strip())
+        write_line(switch, line_num, line)
 
     stdout.write("\rWriting script... 100%\n")
 
@@ -242,4 +243,7 @@ to fix this and get scripting running again.""")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        exit(255)
